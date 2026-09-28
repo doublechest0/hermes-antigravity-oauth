@@ -50,6 +50,7 @@ try:
         _render_message_content,
     )
     from .stream import AntigravityStream, collect_stream_completion
+    from . import soul as _soul
 except ImportError:
     from models import (
         _FALLBACK_MODELS,
@@ -79,6 +80,7 @@ except ImportError:
         _render_message_content,
     )
     from stream import AntigravityStream, collect_stream_completion
+    import soul as _soul
 
 logger = logging.getLogger(__name__)
 
@@ -447,6 +449,27 @@ class AntigravityClient:
         with self._lock:
             self._worker_history = list(messages or [])
 
+    def _sync_workspace_rules(self, messages: list[dict[str, Any]]) -> bool:
+        """Write SOUL.md + Hermes system prompt to the workspace GEMINI.md agy loads as rules.
+
+        Returns True when rules are in the workspace (prompt then omits them). A changed digest
+        retires the running worker, because agy reads rules at session start.
+        """
+        if not _soul.rules_enabled():
+            return False
+        rules = _soul.build_rules(_soul.system_parts_of(messages, _render_message_content), _PROMPT_PREAMBLE)
+        try:
+            digest = _soul.write_rules(self._cwd, rules)
+        except OSError as exc:
+            logger.warning("Antigravity: could not write workspace rules (%s); inlining them", exc)
+            return False
+        with self._lock:
+            changed = getattr(self, "_rules_digest", None) not in (None, digest)
+            self._rules_digest = digest
+        if changed:
+            self._terminate_worker()
+        return True
+
     def _get_or_spawn_worker(self, model: str, effort: str | None) -> subprocess.Popen:
         with self._lock:
             if (
@@ -497,8 +520,9 @@ class AntigravityClient:
         tool_choice: Any,
         stream: bool,
     ) -> Any:
+        rules = self._sync_workspace_rules(messages)
         prompt_text = _format_messages_as_prompt(
-            messages, model=model, tools=tools, tool_choice=tool_choice
+            messages, model=model, tools=tools, tool_choice=tool_choice, rules_in_workspace=rules
         )
         cmd_args = [self._command, *self._args]
         if model:
@@ -576,6 +600,7 @@ class AntigravityClient:
         worker_acquired = self._worker_lock.acquire(blocking=False)
         if worker_acquired:
             try:
+                rules = self._sync_workspace_rules(messages_list)
                 proc = self._get_or_spawn_worker(resolved_model, effort)
                 with self._lock:
                     is_continuation = _messages_match_prefix(self._worker_history, messages_list)
@@ -588,7 +613,8 @@ class AntigravityClient:
                         self._terminate_worker()
                         proc = self._get_or_spawn_worker(resolved_model, effort)
                     prompt_payload = _format_messages_as_prompt(
-                        messages_list, model=resolved_model, tools=tools, tool_choice=tool_choice
+                        messages_list, model=resolved_model, tools=tools, tool_choice=tool_choice,
+                        rules_in_workspace=rules,
                     )
 
                 event_msg = {"event": "user", "message": {"content": prompt_payload}}
@@ -599,7 +625,8 @@ class AntigravityClient:
                     self._terminate_worker()
                     proc = self._get_or_spawn_worker(resolved_model, effort)
                     prompt_payload = _format_messages_as_prompt(
-                        messages_list, model=resolved_model, tools=tools, tool_choice=tool_choice
+                        messages_list, model=resolved_model, tools=tools, tool_choice=tool_choice,
+                        rules_in_workspace=rules,
                     )
                     event_msg = {"event": "user", "message": {"content": prompt_payload}}
                     proc.stdin.write(json.dumps(event_msg) + "\n")
