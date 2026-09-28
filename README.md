@@ -50,6 +50,14 @@ Claude and GPT-OSS models get no `--effort` flag because agy rejects it for them
 PYTHONPATH=<hermes-agent checkout>:. python tests/test_auth_handler.py   # etc. for each tests/test_*.py
 ```
 
+## Releases
+
+Every push to `main` runs `.github/workflows/release.yml`. It first runs the full test suite against Hermes Agent `main`. Then it publishes the next version to npm with provenance, using npm trusted publishing (GitHub OIDC), so the repo stores no npm token. Finally it tags the commit `vX.Y.Z`.
+
+- Default: patch bump from the latest published version.
+- Minor/major: set `version` in `package.json` above the published one in the commit, and that exact version is published.
+- A red test run publishes nothing.
+
 ## Credits
 
 The streaming client, process isolation, and keyring probes come from [soyelmismo/hermes-antigravity-subscription](https://github.com/soyelmismo/hermes-antigravity-subscription) (MIT) at `b7ab470`. This package adds the auth handler, SOUL delivery, native-tool bridging, and the npx installer.
