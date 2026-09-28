@@ -1,5 +1,10 @@
 # hermes-antigravity-oauth
 
+[![npm](https://img.shields.io/npm/v/hermes-antigravity-oauth?logo=npm)](https://www.npmjs.com/package/hermes-antigravity-oauth)
+[![release](https://github.com/neerazz/hermes-antigravity-oauth/actions/workflows/release.yml/badge.svg)](https://github.com/neerazz/hermes-antigravity-oauth/actions/workflows/release.yml)
+[![provenance](https://img.shields.io/badge/npm-provenance-blue)](https://www.npmjs.com/package/hermes-antigravity-oauth#provenance)
+[![license](https://img.shields.io/github/license/neerazz/hermes-antigravity-oauth)](LICENSE)
+
 Run [Hermes Agent](https://hermes-agent.nousresearch.com) on your Google Antigravity plan (Gemini 3.x, Claude 4.6, GPT-OSS) with a single sign-in.
 
 ```bash
