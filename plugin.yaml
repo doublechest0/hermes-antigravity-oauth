@@ -1,0 +1,16 @@
+name: antigravity-oauth
+manifest_version: 2
+version: 0.1.0
+kind: model-provider
+description: "Sign in to Google Antigravity with `hermes auth add antigravity-oauth` and run Hermes on your Antigravity plan (Gemini 3.x, Claude 4.6, GPT-OSS) through the official agy CLI. The plugin never reads or stores the OAuth token."
+author: "Neeraj Kumar Singh Beshane (neerazz)"
+license: MIT
+homepage: https://github.com/neerazz/hermes-antigravity-oauth
+platforms:
+  - linux
+  - macos
+  - windows
+requires_hermes: ">=0.21.0"
+external_dependencies:
+  - command: agy
+capabilities: []
