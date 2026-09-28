@@ -54,7 +54,9 @@ class StreamBridgeTests(unittest.TestCase):
         proc.poll.return_value = None
         proc.stdout.readline.side_effect = [json.dumps(e) + "\n" for e in events] + [""] * 50
         proc.stdin = MagicMock()
-        with patch("subprocess.Popen", return_value=proc), patch.object(client, "_terminate_process") as term:
+        # Hermetic: never probe the host keyring (on Linux that probe itself goes through Popen).
+        with patch("client.is_authenticated", return_value=True), \
+                patch("subprocess.Popen", return_value=proc), patch.object(client, "_terminate_process") as term:
             chunks = list(client.chat.completions.create(model="claude-sonnet-4-6", tools=tools, stream=True,
                                                          messages=[{"role": "user", "content": "run it"}]))
         return chunks, term, proc
