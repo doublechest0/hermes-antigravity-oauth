@@ -28,7 +28,7 @@ _PROMPT_PREAMBLE = (
     "You are being used strictly as an LLM inference backend for Hermes Agent.",
     "All tool executions and filesystem interactions are performed exclusively by Hermes Agent.",
     "You MUST NOT attempt to invoke native agent tools (such as run_command, write_to_file, etc.).",
-    "EXCEPTION FOR IMAGES: If an attached image file is provided in the prompt, you MUST use your native view_file tool to inspect the image and see its visual content.",
+    "EXCEPTION FOR MULTIMODAL MEDIA (IMAGES, PDF, VIDEO, AUDIO): If an attached media file (image, PDF document, video, or audio) is provided in the prompt, you MUST use your native view_file tool with AbsolutePath to inspect the file and directly perceive its visual, audio, or document content.",
     "IMPORTANT INSTRUCTIONS FOR TOOLS:",
     "- If you need to call a tool, emit ONLY <tool_call>{...}</tool_call> blocks in your text output.",
     "- Each tool call must be a JSON object containing 'id', 'type': 'function', and 'function': {'name': '...', 'arguments': '...'}.",
@@ -47,7 +47,22 @@ IMAGE_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg", ".tiff", ".ico"
 })
 
+DOCUMENT_EXTENSIONS = frozenset({
+    ".pdf",
+})
+
+AUDIO_EXTENSIONS = frozenset({
+    ".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac", ".opus", ".wma", ".weba"
+})
+
+VIDEO_EXTENSIONS = frozenset({
+    ".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v", ".ogv"
+})
+
+MULTIMODAL_EXTENSIONS = IMAGE_EXTENSIONS | DOCUMENT_EXTENSIONS | AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
+
 MIME_TO_EXT = {
+    # Images
     "image/png": ".png",
     "image/jpeg": ".jpg",
     "image/jpg": ".jpg",
@@ -56,31 +71,68 @@ MIME_TO_EXT = {
     "image/bmp": ".bmp",
     "image/svg+xml": ".svg",
     "image/tiff": ".tiff",
+    "image/x-icon": ".ico",
+    # Documents
+    "application/pdf": ".pdf",
+    "application/x-pdf": ".pdf",
+    # Audio
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/ogg": ".ogg",
+    "audio/m4a": ".m4a",
+    "audio/x-m4a": ".m4a",
+    "audio/aac": ".aac",
+    "audio/flac": ".flac",
+    "audio/x-flac": ".flac",
+    "audio/opus": ".opus",
+    "audio/webm": ".weba",
+    # Video
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+    "video/x-msvideo": ".avi",
+    "video/x-matroska": ".mkv",
+    "video/ogg": ".ogv",
 }
 
 
-def _materialize_image_item(item: Any, media_dir: str | Path | None = None) -> str | None:
-    """Extract or decode image from an image_url dict or string and return a local absolute file path."""
+def _media_prefix_for_ext(ext: str) -> str:
+    if ext in IMAGE_EXTENSIONS:
+        return "img"
+    if ext in DOCUMENT_EXTENSIONS:
+        return "doc"
+    if ext in AUDIO_EXTENSIONS:
+        return "audio"
+    if ext in VIDEO_EXTENSIONS:
+        return "video"
+    return "media"
+
+
+def _materialize_media_item(item: Any, media_dir: str | Path | None = None) -> str | None:
+    """Extract or decode media (image, pdf, video, audio) and return a local absolute file path."""
     url_val = None
     if isinstance(item, str):
         url_val = item.strip()
     elif isinstance(item, dict):
-        if "image_url" in item:
-            iu = item["image_url"]
-            if isinstance(iu, dict):
-                url_val = iu.get("url")
-            elif isinstance(iu, str):
-                url_val = iu
-        elif item.get("type") in ("image_url", "image") and "url" in item:
-            url_val = item["url"]
-        elif item.get("type") == "image" and "source" in item:
-            source = item["source"]
-            if isinstance(source, dict) and source.get("type") == "base64":
-                data = source.get("data", "")
-                media_type = source.get("media_type", "image/png")
-                url_val = f"data:{media_type};base64,{data}"
-        elif "url" in item:
-            url_val = item["url"]
+        for k in ("image_url", "video_url", "audio_url", "media_url", "pdf_url", "file_url", "url"):
+            if k in item:
+                val = item[k]
+                if isinstance(val, dict):
+                    url_val = val.get("url")
+                elif isinstance(val, str):
+                    url_val = val
+                if url_val:
+                    break
+
+        if not url_val and item.get("type") in ("image", "video", "audio", "pdf", "file", "document"):
+            if "source" in item:
+                source = item["source"]
+                if isinstance(source, dict) and source.get("type") == "base64":
+                    data = source.get("data", "")
+                    media_type = source.get("media_type", "image/png")
+                    url_val = f"data:{media_type};base64,{data}"
 
     if not url_val or not isinstance(url_val, str):
         return None
@@ -91,19 +143,20 @@ def _materialize_image_item(item: Any, media_dir: str | Path | None = None) -> s
     except Exception:
         target_dir = Path(tempfile.gettempdir())
 
-    if url_val.startswith("data:image/"):
+    if url_val.startswith("data:"):
         try:
             header, b64 = url_val.split(",", 1)
             mime = header.split(";")[0].split(":", 1)[1].strip().lower()
             ext = MIME_TO_EXT.get(mime, ".png")
+            prefix = _media_prefix_for_ext(ext)
             raw_bytes = base64.b64decode(b64)
             file_hash = hashlib.sha256(raw_bytes).hexdigest()[:16]
-            out_path = target_dir / f"img_{file_hash}{ext}"
+            out_path = target_dir / f"{prefix}_{file_hash}{ext}"
             if not out_path.exists():
                 out_path.write_bytes(raw_bytes)
             return str(out_path.resolve())
         except Exception as exc:
-            logger.warning("Failed to decode base64 image: %s", exc)
+            logger.warning("Failed to decode base64 media: %s", exc)
             return None
 
     if url_val.startswith("file://"):
@@ -121,25 +174,30 @@ def _materialize_image_item(item: Any, media_dir: str | Path | None = None) -> s
         try:
             file_hash = hashlib.sha256(url_val.encode()).hexdigest()[:16]
             ext = ".png"
-            for e in IMAGE_EXTENSIONS:
-                if url_val.lower().endswith(e):
+            for e in MULTIMODAL_EXTENSIONS:
+                if url_val.lower().split("?")[0].split("#")[0].endswith(e):
                     ext = e
                     break
-            out_path = target_dir / f"web_{file_hash}{ext}"
+            prefix = _media_prefix_for_ext(ext)
+            out_path = target_dir / f"web_{prefix}_{file_hash}{ext}"
             if not out_path.exists():
                 req = urllib.request.Request(url_val, headers={"User-Agent": "Hermes-Agent"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
+                with urllib.request.urlopen(req, timeout=15) as resp:
                     out_path.write_bytes(resp.read())
             return str(out_path.resolve())
         except Exception as exc:
-            logger.warning("Failed to download image URL %s: %s", url_val, exc)
+            logger.warning("Failed to download media URL %s: %s", url_val, exc)
             return None
 
     return None
 
 
+# Backward compatibility
+_materialize_image_item = _materialize_media_item
+
+
 def _render_message_content(content: Any, media_dir: str | Path | None = None) -> str:
-    """Normalize multimodal or structured message content into a string, preserving image links."""
+    """Normalize multimodal or structured message content into a string, preserving media links."""
     if content is None:
         return ""
 
@@ -156,32 +214,38 @@ def _render_message_content(content: Any, media_dir: str | Path | None = None) -
             except Exception:
                 pass
 
-        # 2) Scan string for any embedded data:image/... base64 URLs and materialize them to files
-        if "data:image/" in content:
+        # 2) Scan string for any embedded data URLs (image, audio, video, pdf) and materialize them to files
+        if "data:" in content:
             def _replace_b64(match: re.Match) -> str:
-                path = _materialize_image_item(match.group(0), media_dir=media_dir)
+                path = _materialize_media_item(match.group(0), media_dir=media_dir)
                 if path:
-                    return f'[Attached image file: "{path}". You MUST use your native view_file tool with AbsolutePath="{path}" to inspect this image.]'
-                return "[image data]"
+                    return f'[Attached media file: "{path}". You MUST use your native view_file tool with AbsolutePath="{path}" to inspect this file.]'
+                return "[media data]"
 
-            content = re.sub(r'data:image/[a-zA-Z0-9.+_-]+;base64,[A-Za-z0-9+/=]+', _replace_b64, content)
+            content = re.sub(
+                r'data:(?:image|audio|video|application)/[a-zA-Z0-9.+_-]+;base64,[A-Za-z0-9+/=]+',
+                _replace_b64,
+                content,
+            )
         return content.strip()
 
     if isinstance(content, dict):
+        media_types = ("image_url", "image", "video_url", "video", "audio_url", "audio", "pdf", "file", "document")
         # 1) Hermes multimodal tool result envelope: {"_multimodal": True, "content": [...]}
         # or OpenAI structured dict with "content"
-        if "_multimodal" in content or ("content" in content and not ("type" in content and content.get("type") in ("image_url", "image"))):
+        if "_multimodal" in content or ("content" in content and not ("type" in content and content.get("type") in media_types)):
             sub = content.get("content")
             if sub is not None:
                 rendered_sub = _render_message_content(sub, media_dir=media_dir)
                 if rendered_sub:
                     return rendered_sub
 
-        # 2) Image item: {"type": "image_url", "image_url": ...}
-        if content.get("type") in ("image_url", "image") or "image_url" in content:
-            img_path = _materialize_image_item(content, media_dir=media_dir)
-            if img_path:
-                return f'[Attached image file: "{img_path}". You MUST use your native view_file tool with AbsolutePath="{img_path}" to inspect this image.]'
+        # 2) Media item (image, audio, video, pdf)
+        media_keys = ("image_url", "video_url", "audio_url", "media_url", "pdf_url", "file_url", "url")
+        if content.get("type") in media_types or any(k in content for k in media_keys):
+            media_path = _materialize_media_item(content, media_dir=media_dir)
+            if media_path:
+                return f'[Attached media file: "{media_path}". You MUST use your native view_file tool with AbsolutePath="{media_path}" to inspect this file.]'
 
         # 3) Text item
         if "text" in content:

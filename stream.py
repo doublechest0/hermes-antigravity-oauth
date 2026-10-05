@@ -567,9 +567,9 @@ class AntigravityStream(Iterator[Any]):
                     if not self.conversation_id:
                         self.conversation_id = step.get("conversation_id", "")
                     if step.get("step_type") == "tool":
-                        if _native_tools.is_native_image_view(step):
+                        if getattr(_native_tools, "is_native_multimodal_view", _native_tools.is_native_image_view)(step):
                             logger.info(
-                                "Allowing native agy view_file for image: %s",
+                                "Allowing native agy view_file for multimodal file: %s",
                                 (step.get("tool_info") or {}).get("parameters"),
                             )
                             continue

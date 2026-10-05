@@ -88,6 +88,27 @@ IMAGE_EXTENSIONS = frozenset({
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg", ".tiff", ".ico"
 })
 
+DOCUMENT_EXTENSIONS = frozenset({
+    ".pdf",
+})
+
+AUDIO_EXTENSIONS = frozenset({
+    ".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac", ".opus", ".wma", ".weba"
+})
+
+VIDEO_EXTENSIONS = frozenset({
+    ".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v", ".ogv"
+})
+
+MULTIMODAL_EXTENSIONS = IMAGE_EXTENSIONS | DOCUMENT_EXTENSIONS | AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
+
+
+def is_multimodal_path(path: Any) -> bool:
+    if not path or not isinstance(path, str):
+        return False
+    clean = path.split("?")[0].split("#")[0].strip().lower()
+    return any(clean.endswith(ext) for ext in MULTIMODAL_EXTENSIONS)
+
 
 def is_image_path(path: Any) -> bool:
     if not path or not isinstance(path, str):
@@ -96,8 +117,8 @@ def is_image_path(path: Any) -> bool:
     return any(clean.endswith(ext) for ext in IMAGE_EXTENSIONS)
 
 
-def is_native_image_view(step: dict[str, Any]) -> bool:
-    """Return True if step is an agy native view_file call on an image file."""
+def is_native_multimodal_view(step: dict[str, Any]) -> bool:
+    """Return True if step is an agy native view_file call on a multimodal file (image, pdf, video, audio)."""
     if step.get("step_type") != "tool":
         return False
     name = str(step.get("tool_name") or (step.get("tool_info") or {}).get("name") or "")
@@ -105,7 +126,11 @@ def is_native_image_view(step: dict[str, Any]) -> bool:
         return False
     params = (step.get("tool_info") or {}).get("parameters") or {}
     path = _pick(params, "AbsolutePath", "path", "file_path", "FilePath")
-    return is_image_path(path)
+    return is_multimodal_path(path)
+
+
+# Backward compatibility
+is_native_image_view = is_native_multimodal_view
 
 
 # agy tool name -> (Hermes tool name, argument mapper)
@@ -131,7 +156,7 @@ def tool_names(tools: list[dict[str, Any]] | None) -> set[str]:
 
 def translate(step: dict[str, Any], available: set[str], index: int) -> SimpleNamespace | None:
     """Return a Hermes tool-call delta for an agy native tool step, or None if it cannot be mapped."""
-    if is_native_image_view(step):
+    if is_native_multimodal_view(step):
         return None
     native = str(step.get("tool_name") or (step.get("tool_info") or {}).get("name") or "")
     mapping = NATIVE_TO_HERMES.get(native)

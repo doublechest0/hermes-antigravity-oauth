@@ -64,7 +64,7 @@ class VisionBridgeTests(unittest.TestCase):
         rendered = _render_message_content(content, self.media_dir)
 
         self.assertIn("What is in this screenshot?", rendered)
-        self.assertIn("[Attached image file:", rendered)
+        self.assertIn("[Attached media file:", rendered)
         self.assertIn("view_file", rendered)
 
     def test_render_message_content_with_multimodal_dict(self):
@@ -80,7 +80,7 @@ class VisionBridgeTests(unittest.TestCase):
         rendered = _render_message_content(content, self.media_dir)
 
         self.assertIn("Image loaded into your context", rendered)
-        self.assertIn("[Attached image file:", rendered)
+        self.assertIn("[Attached media file:", rendered)
         self.assertNotIn("data:image/png", rendered)
 
     def test_render_message_content_with_json_multimodal_string(self):
@@ -96,7 +96,7 @@ class VisionBridgeTests(unittest.TestCase):
         rendered = _render_message_content(json.dumps(envelope), self.media_dir)
 
         self.assertIn("Image loaded into your context", rendered)
-        self.assertIn("[Attached image file:", rendered)
+        self.assertIn("[Attached media file:", rendered)
         self.assertNotIn("data:image/png", rendered)
 
     def test_render_message_content_with_embedded_b64_in_text(self):
@@ -106,25 +106,51 @@ class VisionBridgeTests(unittest.TestCase):
         rendered = _render_message_content(text, self.media_dir)
 
         self.assertIn("Check this out:", rendered)
-        self.assertIn("[Attached image file:", rendered)
+        self.assertIn("[Attached media file:", rendered)
         self.assertNotIn("data:image/png", rendered)
 
-    def test_native_image_view_check(self):
-        step_img = {
-            "step_type": "tool",
-            "tool_name": "view_file",
-            "tool_info": {"name": "view_file", "parameters": {"AbsolutePath": "/tmp/pic.png"}},
-        }
-        self.assertTrue(native_tools.is_native_image_view(step_img))
-        # Must not translate to Hermes read_file
-        self.assertIsNone(native_tools.translate(step_img, {"read_file"}, 0))
+    def test_materialize_audio_and_video(self):
+        # Audio test (fake mp3 base64)
+        audio_b64 = base64.b64encode(b"ID3dummy_audio_bytes").decode("ascii")
+        audio_item = {"type": "audio", "url": f"data:audio/mp3;base64,{audio_b64}"}
+        out_audio = _materialize_image_item(audio_item, self.media_dir)
+        self.assertIsNotNone(out_audio)
+        self.assertTrue(out_audio.endswith(".mp3"))
+        self.assertTrue(Path(out_audio).exists())
+
+        # Video test (fake mp4 base64)
+        video_b64 = base64.b64encode(b"\x00\x00\x00 ftypmp42").decode("ascii")
+        video_item = {"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{video_b64}"}}
+        out_video = _materialize_image_item(video_item, self.media_dir)
+        self.assertIsNotNone(out_video)
+        self.assertTrue(out_video.endswith(".mp4"))
+        self.assertTrue(Path(out_video).exists())
+
+        # PDF test (fake pdf base64)
+        pdf_b64 = base64.b64encode(b"%PDF-1.4 dummy").decode("ascii")
+        pdf_item = {"type": "file", "url": f"data:application/pdf;base64,{pdf_b64}"}
+        out_pdf = _materialize_image_item(pdf_item, self.media_dir)
+        self.assertIsNotNone(out_pdf)
+        self.assertTrue(out_pdf.endswith(".pdf"))
+        self.assertTrue(Path(out_pdf).exists())
+
+    def test_native_multimodal_view_check(self):
+        for path in ("/tmp/pic.png", "/data/speech.mp3", "/media/clip.mp4", "/docs/paper.pdf"):
+            step = {
+                "step_type": "tool",
+                "tool_name": "view_file",
+                "tool_info": {"name": "view_file", "parameters": {"AbsolutePath": path}},
+            }
+            self.assertTrue(native_tools.is_native_multimodal_view(step))
+            # Must NOT translate to Hermes read_file
+            self.assertIsNone(native_tools.translate(step, {"read_file"}, 0))
 
         step_code = {
             "step_type": "tool",
             "tool_name": "view_file",
             "tool_info": {"name": "view_file", "parameters": {"AbsolutePath": "/tmp/main.py"}},
         }
-        self.assertFalse(native_tools.is_native_image_view(step_code))
+        self.assertFalse(native_tools.is_native_multimodal_view(step_code))
         call = native_tools.translate(step_code, {"read_file"}, 0)
         self.assertIsNotNone(call)
         self.assertEqual(call.function.name, "read_file")
