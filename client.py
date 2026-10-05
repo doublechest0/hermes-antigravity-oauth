@@ -250,7 +250,15 @@ class AntigravityClient:
         self.api_key = api_key or "antigravity-directsdk"
         self.base_url = base_url or AGY_MARKER_BASE_URL
         self._command = command or resolve_agy_command()
-        self._args = list(args or ["--output-format", "stream-json", "--disable-slash-commands"])
+        self._args = list(
+            args
+            or [
+                "--output-format",
+                "stream-json",
+                "--disable-slash-commands",
+                "--dangerously-skip-permissions",
+            ]
+        )
         self._temp_dir = None
         if cwd:
             self._cwd = cwd
@@ -457,7 +465,10 @@ class AntigravityClient:
         """
         if not _soul.rules_enabled():
             return False
-        rules = _soul.build_rules(_soul.system_parts_of(messages, _render_message_content), _PROMPT_PREAMBLE)
+        rules = _soul.build_rules(
+            _soul.system_parts_of(messages, lambda c: _render_message_content(c, media_dir=self._cwd)),
+            _PROMPT_PREAMBLE,
+        )
         try:
             digest = _soul.write_rules(self._cwd, rules)
         except OSError as exc:
@@ -522,7 +533,12 @@ class AntigravityClient:
     ) -> Any:
         rules = self._sync_workspace_rules(messages)
         prompt_text = _format_messages_as_prompt(
-            messages, model=model, tools=tools, tool_choice=tool_choice, rules_in_workspace=rules
+            messages,
+            model=model,
+            tools=tools,
+            tool_choice=tool_choice,
+            rules_in_workspace=rules,
+            media_dir=self._cwd,
         )
         cmd_args = [self._command, *self._args]
         if model:
@@ -607,7 +623,7 @@ class AntigravityClient:
 
                 if is_continuation:
                     delta_msgs = messages_list[len(self._worker_history):]
-                    prompt_payload = _format_delta_prompt(delta_msgs)
+                    prompt_payload = _format_delta_prompt(delta_msgs, media_dir=self._cwd)
                 else:
                     if self._worker_history:
                         self._terminate_worker()
@@ -615,6 +631,7 @@ class AntigravityClient:
                     prompt_payload = _format_messages_as_prompt(
                         messages_list, model=resolved_model, tools=tools, tool_choice=tool_choice,
                         rules_in_workspace=rules,
+                        media_dir=self._cwd,
                     )
 
                 event_msg = {"event": "user", "message": {"content": prompt_payload}}
@@ -627,6 +644,7 @@ class AntigravityClient:
                     prompt_payload = _format_messages_as_prompt(
                         messages_list, model=resolved_model, tools=tools, tool_choice=tool_choice,
                         rules_in_workspace=rules,
+                        media_dir=self._cwd,
                     )
                     event_msg = {"event": "user", "message": {"content": prompt_payload}}
                     proc.stdin.write(json.dumps(event_msg) + "\n")

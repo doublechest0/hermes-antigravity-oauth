@@ -84,6 +84,30 @@ def _web_extract(p: dict[str, Any]) -> dict[str, Any] | None:
     return {"urls": [str(url)]} if url else None
 
 
+IMAGE_EXTENSIONS = frozenset({
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg", ".tiff", ".ico"
+})
+
+
+def is_image_path(path: Any) -> bool:
+    if not path or not isinstance(path, str):
+        return False
+    clean = path.split("?")[0].split("#")[0].strip().lower()
+    return any(clean.endswith(ext) for ext in IMAGE_EXTENSIONS)
+
+
+def is_native_image_view(step: dict[str, Any]) -> bool:
+    """Return True if step is an agy native view_file call on an image file."""
+    if step.get("step_type") != "tool":
+        return False
+    name = str(step.get("tool_name") or (step.get("tool_info") or {}).get("name") or "")
+    if name != "view_file":
+        return False
+    params = (step.get("tool_info") or {}).get("parameters") or {}
+    path = _pick(params, "AbsolutePath", "path", "file_path", "FilePath")
+    return is_image_path(path)
+
+
 # agy tool name -> (Hermes tool name, argument mapper)
 NATIVE_TO_HERMES: dict[str, tuple[str, Mapper]] = {
     "run_command": ("terminal", _terminal),
@@ -107,6 +131,8 @@ def tool_names(tools: list[dict[str, Any]] | None) -> set[str]:
 
 def translate(step: dict[str, Any], available: set[str], index: int) -> SimpleNamespace | None:
     """Return a Hermes tool-call delta for an agy native tool step, or None if it cannot be mapped."""
+    if is_native_image_view(step):
+        return None
     native = str(step.get("tool_name") or (step.get("tool_info") or {}).get("name") or "")
     mapping = NATIVE_TO_HERMES.get(native)
     if not mapping:
@@ -123,3 +149,4 @@ def translate(step: dict[str, Any], available: set[str], index: int) -> SimpleNa
     ident = f"agy_{step.get('step_index', index)}_{native}"
     return SimpleNamespace(index=index, id=ident, type="function",
                            function=SimpleNamespace(name=hermes_name, arguments=json.dumps(args, ensure_ascii=False)))
+

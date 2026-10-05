@@ -567,6 +567,12 @@ class AntigravityStream(Iterator[Any]):
                     if not self.conversation_id:
                         self.conversation_id = step.get("conversation_id", "")
                     if step.get("step_type") == "tool":
+                        if _native_tools.is_native_image_view(step):
+                            logger.info(
+                                "Allowing native agy view_file for image: %s",
+                                (step.get("tool_info") or {}).get("parameters"),
+                            )
+                            continue
                         call = _native_tools.translate(step, self.tool_names, index=0) if not has_tool_calls else None
                         if call is not None:
                             logger.info("Antigravity native tool '%s' re-issued as Hermes tool '%s'.",
