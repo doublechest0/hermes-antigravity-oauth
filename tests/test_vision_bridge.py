@@ -67,6 +67,48 @@ class VisionBridgeTests(unittest.TestCase):
         self.assertIn("[Attached image file:", rendered)
         self.assertIn("view_file", rendered)
 
+    def test_render_message_content_with_multimodal_dict(self):
+        raw_png = b"\x89PNG\r\ndummy"
+        b64_str = base64.b64encode(raw_png).decode("ascii")
+        content = {
+            "_multimodal": True,
+            "content": [
+                {"type": "text", "text": "Image loaded into your context"},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_str}"}},
+            ],
+        }
+        rendered = _render_message_content(content, self.media_dir)
+
+        self.assertIn("Image loaded into your context", rendered)
+        self.assertIn("[Attached image file:", rendered)
+        self.assertNotIn("data:image/png", rendered)
+
+    def test_render_message_content_with_json_multimodal_string(self):
+        raw_png = b"\x89PNG\r\ndummy"
+        b64_str = base64.b64encode(raw_png).decode("ascii")
+        envelope = {
+            "_multimodal": True,
+            "content": [
+                {"type": "text", "text": "Image loaded into your context"},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_str}"}},
+            ],
+        }
+        rendered = _render_message_content(json.dumps(envelope), self.media_dir)
+
+        self.assertIn("Image loaded into your context", rendered)
+        self.assertIn("[Attached image file:", rendered)
+        self.assertNotIn("data:image/png", rendered)
+
+    def test_render_message_content_with_embedded_b64_in_text(self):
+        raw_png = b"\x89PNG\r\ndummy"
+        b64_str = base64.b64encode(raw_png).decode("ascii")
+        text = f"Check this out: data:image/png;base64,{b64_str} please!"
+        rendered = _render_message_content(text, self.media_dir)
+
+        self.assertIn("Check this out:", rendered)
+        self.assertIn("[Attached image file:", rendered)
+        self.assertNotIn("data:image/png", rendered)
+
     def test_native_image_view_check(self):
         step_img = {
             "step_type": "tool",

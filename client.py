@@ -259,6 +259,8 @@ class AntigravityClient:
                 "--dangerously-skip-permissions",
             ]
         )
+        if "--dangerously-skip-permissions" not in self._args:
+            self._args.append("--dangerously-skip-permissions")
         self._temp_dir = None
         if cwd:
             self._cwd = cwd

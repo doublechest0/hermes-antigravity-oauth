@@ -9,7 +9,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const REPO = "https://github.com/neerazz/hermes-antigravity-oauth";
+const REPO = "https://github.com/doublechest0/hermes-antigravity-oauth";
 const PLUGIN = "antigravity-oauth";
 // Google's official agy installer. Downloaded to a temp file and run from disk, never piped.
 const AGY_INSTALLER = process.platform === "win32"

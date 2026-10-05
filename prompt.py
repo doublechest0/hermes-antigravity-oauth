@@ -59,23 +59,28 @@ MIME_TO_EXT = {
 }
 
 
-def _materialize_image_item(item: dict[str, Any], media_dir: str | Path | None = None) -> str | None:
-    """Extract or decode image from an image_url dict and return a local absolute file path."""
+def _materialize_image_item(item: Any, media_dir: str | Path | None = None) -> str | None:
+    """Extract or decode image from an image_url dict or string and return a local absolute file path."""
     url_val = None
-    if "image_url" in item:
-        iu = item["image_url"]
-        if isinstance(iu, dict):
-            url_val = iu.get("url")
-        elif isinstance(iu, str):
-            url_val = iu
-    elif item.get("type") in ("image_url", "image") and "url" in item:
-        url_val = item["url"]
-    elif item.get("type") == "image" and "source" in item:
-        source = item["source"]
-        if isinstance(source, dict) and source.get("type") == "base64":
-            data = source.get("data", "")
-            media_type = source.get("media_type", "image/png")
-            url_val = f"data:{media_type};base64,{data}"
+    if isinstance(item, str):
+        url_val = item.strip()
+    elif isinstance(item, dict):
+        if "image_url" in item:
+            iu = item["image_url"]
+            if isinstance(iu, dict):
+                url_val = iu.get("url")
+            elif isinstance(iu, str):
+                url_val = iu
+        elif item.get("type") in ("image_url", "image") and "url" in item:
+            url_val = item["url"]
+        elif item.get("type") == "image" and "source" in item:
+            source = item["source"]
+            if isinstance(source, dict) and source.get("type") == "base64":
+                data = source.get("data", "")
+                media_type = source.get("media_type", "image/png")
+                url_val = f"data:{media_type};base64,{data}"
+        elif "url" in item:
+            url_val = item["url"]
 
     if not url_val or not isinstance(url_val, str):
         return None
@@ -137,29 +142,69 @@ def _render_message_content(content: Any, media_dir: str | Path | None = None) -
     """Normalize multimodal or structured message content into a string, preserving image links."""
     if content is None:
         return ""
+
+    if isinstance(content, str):
+        raw_str = content.strip()
+        # 1) Try unpacking JSON strings (e.g. tool results containing serialized multimodal envelopes)
+        if (raw_str.startswith("{") and raw_str.endswith("}")) or (raw_str.startswith("[") and raw_str.endswith("]")):
+            try:
+                parsed = json.loads(raw_str)
+                if isinstance(parsed, (dict, list)):
+                    rendered = _render_message_content(parsed, media_dir=media_dir)
+                    if rendered:
+                        return rendered
+            except Exception:
+                pass
+
+        # 2) Scan string for any embedded data:image/... base64 URLs and materialize them to files
+        if "data:image/" in content:
+            def _replace_b64(match: re.Match) -> str:
+                path = _materialize_image_item(match.group(0), media_dir=media_dir)
+                if path:
+                    return f'[Attached image file: "{path}". You MUST use your native view_file tool with AbsolutePath="{path}" to inspect this image.]'
+                return "[image data]"
+
+            content = re.sub(r'data:image/[a-zA-Z0-9.+_-]+;base64,[A-Za-z0-9+/=]+', _replace_b64, content)
+        return content.strip()
+
     if isinstance(content, dict):
+        # 1) Hermes multimodal tool result envelope: {"_multimodal": True, "content": [...]}
+        # or OpenAI structured dict with "content"
+        if "_multimodal" in content or ("content" in content and not ("type" in content and content.get("type") in ("image_url", "image"))):
+            sub = content.get("content")
+            if sub is not None:
+                rendered_sub = _render_message_content(sub, media_dir=media_dir)
+                if rendered_sub:
+                    return rendered_sub
+
+        # 2) Image item: {"type": "image_url", "image_url": ...}
         if content.get("type") in ("image_url", "image") or "image_url" in content:
-            img_path = _materialize_image_item(content, media_dir)
+            img_path = _materialize_image_item(content, media_dir=media_dir)
             if img_path:
                 return f'[Attached image file: "{img_path}". You MUST use your native view_file tool with AbsolutePath="{img_path}" to inspect this image.]'
+
+        # 3) Text item
         if "text" in content:
-            return str(content.get("text") or "").strip()
-        return str(content.get("content") or "").strip()
+            return _render_message_content(content.get("text"), media_dir=media_dir)
+
+        # 4) Fallback dict
+        parts = []
+        for k, v in content.items():
+            if k in ("_multimodal",):
+                continue
+            r = _render_message_content(v, media_dir=media_dir)
+            if r:
+                parts.append(r)
+        return "\n".join(parts).strip()
+
     if isinstance(content, list):
         parts = []
         for item in content:
-            if isinstance(item, str):
-                parts.append(item.strip())
-            elif isinstance(item, dict):
-                if item.get("type") in ("image_url", "image") or "image_url" in item:
-                    img_path = _materialize_image_item(item, media_dir)
-                    if img_path:
-                        parts.append(f'[Attached image file: "{img_path}". You MUST use your native view_file tool with AbsolutePath="{img_path}" to inspect this image.]')
-                elif item.get("type") == "text":
-                    parts.append(str(item.get("text") or "").strip())
-                elif "content" in item:
-                    parts.append(str(item.get("content") or "").strip())
-        return "\n".join(p for p in parts if p).strip()
+            r = _render_message_content(item, media_dir=media_dir)
+            if r:
+                parts.append(r)
+        return "\n".join(parts).strip()
+
     return str(content).strip()
 
 
